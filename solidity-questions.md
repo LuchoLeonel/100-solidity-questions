@@ -250,17 +250,64 @@ If the value was previously modified during the same transaction, all the subseq
 The code that is inside a constructor or part of a global variable declaration is not part of a deployed contract’s runtime bytecode. This code is executed only once, when the contract instance is deployed. As a consequence of this, the code within a logic contract’s constructor will never be executed in the context of the proxy’s state.
 The problem is easily solved though. Logic contracts should move the code within the constructor to a regular 'initializer' function, and have this function be called whenever the proxy links to this logic contract.
 
-23. What is the difference between UUPS and the Transparent Upgradeable Proxy pattern? x
-24. What danger do ERC777 tokens pose? x
-25. What is a bonding curve? x
-26. How does safeMint differ from mint in the OpenZeppelin ERC721 implementation? x
+23. What is the difference between UUPS and the Transparent Upgradeable Proxy pattern?
+The original proxies included in OpenZeppelin followed the Transparent Proxy Pattern. Our recommendation is now shifting towards UUPS proxies, which are both lightweight and versatile.
+
+While both of these share the same interface for upgrades, in UUPS proxies the upgrade is handled by the implementation, and can eventually be removed. Transparent proxies, on the other hand, include the upgrade and admin logic in the proxy itself. This means TransparentUpgradeableProxy is more expensive to deploy than what is possible with UUPS proxies.
+
+24. What danger do ERC777 tokens pose?
+ERC777 introduces a call to the contract that it's being transferred the tokens before actually transfer them.
+In 2020 imBTC Uniswap Pool was drained for ~$300k in ETH. The attacker leverages this call to the contract that receives the tokens to make a reentrancy to the pool, in such a way that this person can use a small amount of ETH to swap out most of the tokens. This is achiavable because the “token_reserve” value will not be updated in consecutive token exchanges, leading to the violation of the “xy=k” setting of Uniswap. The attacker could sell tokens at a much better rate to drain the liquidation pool.
+
+25. What is a bonding curve?
+A bonding curve is a mathematically defined relationship between price and supply. In short, as the supply increases, so does the price. This is somewhat counter-intuitive to traditional models, but the method is for each subsequent buyer of a token to pay a slightly higher price than the previous buyer and a lower price than any subsequent buyer. BCOs support sustained organic growth. New tokens are created by the contract when demand is there, escalating in price each time. By sidestepping the requirement of setting the initial price, it stops vast swathes of a token being picked up at a particular price point and then subsequently dumped. It also removes the need for exchanges: As a fully automated market maker (AMM), bonding curves not only allow for the calculation of a token’s price, but also enable the investor to simply buy or sell their tokens right there.
+
+26. How does safeMint differ from mint in the OpenZeppelin ERC721 implementation?
+When using safeMint, the token contract checks to see that the receiver is an IERC721Receiver, which implies that it knows how to handle ERC721 tokens. When using mint the contract just assumes that it can handle ERC721 tokens.
+
 27. What keywords are provided in Solidity to measure time?
+The keyword years is now disallowed due to complications and confusions about leap years.
+
+1 minutes == 60 (seconds)
+1 hours == 60 minutes
+1 days == 24 hours
+1 weeks == 7 days
+
 28. What is a sandwich attack?
-29. What is a gas efficient alternative to multiplying and dividing by a multiple of two? x
+It's a combination of frontrunning and backrunning. You choose a transaction from the mempool and you submit one transaction that it's going to be validated first than the target transaction (because it has higher gas fee) and then you submit another transaction that is going to be validated slightly after the target transaction (because it has a slightly lower fee).
+You can use this mechanism with a transaction that makes a swap in a liquidation pool and swap the same asset before the target transaction to lower the price and then swapping back after the target transaction the counter asset at that lower price to earn a difference. 
+
+29. What is a gas efficient alternative to multiplying and dividing by a multiple of two?
+A division/multiplication by any number x being a power of 2 can be calculated by shifting log2(x) to the right/left. While the DIV opcode uses 5 gas, the SHR opcode only uses 3 gas. Furthermore, Solidity's division operation also includes a division-by-0 prevention which is bypassed using shifting.
+x * 2 is equivalent to x << 1
+x / 2 is equivalent to x >> 1.
+
 30. How large a uint can be packed with an address in one slot?
+256 (slot) - 160 (address) = 96
+96uint is the max uint that can be packed with an address in one slot.
+
 31. Which operations give a partial refund of gas?
-32. What is ERC165 used for? x
+SELFDESTRUCT: destroys the current executed contract. It refunds 24000 gas. This opcode is going to be deprecated.
+SSTORE: it refunds 15000 gas when it replaces a non-zero value by a zero.
+
+32. What is ERC165 used for?
+ERC165 is an interface to check if a contract supports an interface, it's a meta-interface so to say. It standardizes how interfaces are identified. This is useful if we want to interact with a contract but we don't know if it supports an interface such as ERC721, which has a supportsInterface function.
+
+interface IERC165 {
+    function supportsInterface(bytes4 interfaceId) external view returns (bool);
+}
+
+This method takes the interfaceId as the param and checks if the contract supports that interface. Solidity has in built method called type which returns the unique id of the interface.
+type(MyInterface).interfaceId
+
+
 33. What is a slippage parameter useful for?
+Slippage means the difference between the price that you see on the screen when initialing a transaction and the actual price the swap is executed at. This difference appears because there’s a short delay between when you send a transaction and when it gets validated.
+
+One important problem that slippage protection fixes is sandwich attacks. During sandwiching, attackers “wrap” your swap transactions in their two transactions: one goes before your transaction and the other goes after it. In the first transaction, an attacker modifier the state of a pool so that your swap becomes very unprofitable for you and somewhat profitable for the attacker. This is achieved by adjusting pool liquidity so that your trade happens at a lower price. In the second transaction, the attacker reestablishes pool liquidity and the price. As a result, you get much less tokens than expected due to manipulated prices, and the attacker get some profit.
+
+In UniswapV3 the parameter that allow a user to set a slippage is sqrtPriceLimitX96.
+
 
 ## Hard
 
