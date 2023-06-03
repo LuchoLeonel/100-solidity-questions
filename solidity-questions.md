@@ -232,13 +232,23 @@ None custom modifier.
 
 20. What is the difference between memory and calldata in a function argument?
 Memory is reserved for variables that are defined within the scope of a function and cannot be accessed outside this scope. Calldata is an immutable, temporary location where function arguments are stored.
+-Calldata can only be used in function arguments and not in function logic.
+-One key difference is that memory can be modified by the function, while calldata cannot. This means that if you want to modify a function argument, you must first copy it into memory.
+-It is generally cheaper to load variables directly from calldata, rather than copying them to memory. Only use memory if the variable needs to be modified.
 
-Calldata can only be used in function arguments and not in function logic.
-One key difference is that memory can be modified by the function, while calldata cannot. This means that if you want to modify a function argument, you must first copy it into memory.
-By using calldata, you can avoid the overhead of copying data into memory and reduce the amount of gas needed to execute the function.
+21. Describe the three types of storage gas costs.
+If the value of the slot changes from 0 to 1 (or any non-zero value), the cost is:
+22100 if the storage key wasn’t accessed
+20000 if it was
+If the value of the slot changes from 1 to 2 (or any other non-zero value), the cost is:
+5000 if the storage key wasn’t accessed
+2900 if it was
+If the value of the slot changes from 1 (or any non-zero value) to 0, the cost is the same as the previous item, plus the refund.
+If the value was previously modified during the same transaction, all the subsequent SSTOREs cost 100.
 
-21. Describe the three types of storage gas costs. x
 22. Why shouldn’t upgradeable contracts use the constructor?
+The code that is inside a constructor or part of a global variable declaration is not part of a deployed contract’s runtime bytecode. This code is executed only once, when the contract instance is deployed. As a consequence of this, the code within a logic contract’s constructor will never be executed in the context of the proxy’s state.
+The problem is easily solved though. Logic contracts should move the code within the constructor to a regular 'initializer' function, and have this function be called whenever the proxy links to this logic contract.
 
 23. What is the difference between UUPS and the Transparent Upgradeable Proxy pattern? x
 24. What danger do ERC777 tokens pose? x
