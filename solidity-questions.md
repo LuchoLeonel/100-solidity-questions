@@ -311,34 +311,257 @@ In UniswapV3 the parameter that allow a user to set a slippage is sqrtPriceLimit
 
 ## Hard
 
-1. How does fixed point arithmetic represent numbers? x
+1. How does fixed point arithmetic represent numbers?
+Fixed-point is a method of representing fractional (non-integer) numbers by storing a fixed number of digits of their fractional part.
+A fixed-point representation of a fractional number is essentially an integer that is to be implicitly multiplied by a fixed scaling factor. For example, the value 1.23 can be stored in a variable as the integer value 1230 with implicit scaling factor of 1/1000 (meaning that the last 3 decimal digits are implicitly assumed to be a decimal fraction).
+The main difference between floating point and fixed point numbers is that the number of bits used for the integer and the fractional part (the part after the decimal dot) is flexible in the former, while it is strictly defined in the latter.
+
 2. What is an ERC20 approval frontrunning attack?
+The approve() function allows a another person to be able to spend N amount of tokens from the owner's balance.
+If the malicious party already has an approve from the owner, and the owner wants to reduce the amount of token the malicious party can spend, the owner can send a new approve for a lower amount of token. Here is where the malicious party can take advantage of this. Using the insertion attack, the attacker could front-run the new approve transaction and spend the old value before the new value is set, and then additionally spend the new amount.
+
 3. What opcode accomplishes address(this).balance?
-4. What is an anonymous Solidity event? x
-5. Under what circumstances can a function receive a mapping as an argument? x
-6. What is an inflation attack in ERC4626 x
-7. How many arguments can a solidity function have? x
-8. How many storage slots does this use? uint64[] x = [1,2,3,4,5]? Does it differ from memory? x
-9. Prior to the Shanghai upgrade, under what circumstances is returndatasize() more efficient than push zero? x
-10. Why does the compiler insert the INVALID op code? x
-11. What is the difference between how a custom error and a require with error string is encoded at the EVM level? x
-12. What is the kink parameter in the Compound DeFi formula? x
-13. How can the name of a function affect its gas cost, if at all? x
-14. What is a common vulnerability with ecrecover? x
+You need to call first opcode ADDRESS (30) and then call opcode BALANCE (31).
+
+4. What is an anonymous Solidity event?
+Events can be marked as anonymous, in which case they will not have a selector. Because of this they cannot be easily searched for, or decoded with certainty unless you have the specific contract ABI or the source code of the contract.
+
+Because the event signature is used as one of the indexes, an anonymous function can have four indexed topics, since the function signature is “freed up” as one of the topics.
+
+Anonymous events are rarely used in practice. To make an event anonymous, include the anonymous keyword after declaring the variables:
+
+-event Start(uint start, uint middle, uint end) anonymous;
+
+5. Under what circumstances can a function receive a mapping as an argument?
+Mappings can only have a data location of storage and thus are allowed for state variables, as storage reference types in functions, or as parameters for library functions.
+Mappings cannot be used as parameters or return parameters of contract functions that are publicly visible. These restrictions are also true for arrays and structs that contain mappings.
+But can they can be used as a parameter for internal or private functions since they are not exposed to the outside through the contract’s ABI, they can take parameters of internal types like mappings or storage references.
+
+6. What is an inflation attack in ERC4626?
+ERC4626 is an extension of ERC20 that proposes a standard interface for token vaults. In exchange for the assets deposited into an ERC4626 vault, a user receives shares. These shares can later be burned to redeem the corresponding underlying assets. The number of shares a user gets depends on the amount of assets they put in and on the exchange rate of the vault. This exchange rate is defined by the current liquidity held by the vault. When depositing tokens, the number of shares a user gets is rounded down. 
+Attack scenario:
+A hacker back-runs the transaction of an ERC4626 pool creation.
+The hacker mints for themself one share: deposit(1). Thus, totalAsset()==1, totalSupply()==1.
+The hacker front-runs the deposit of the victim who wants to deposit 20,000 USDT (20,000.000000).
+The hacker inflates the denominator right in front of the victim: asset.transfer(20_000e6). Now totalAsset()==20_000e6 + 1, totalSupply()==1.
+Next, the victim's tx takes place. The victim gets 1 * 20_000e6 / (20_000e6 + 1) == 0 shares. The victim gets zero shares.
+The hacker burns their share and gets all the money.
+
+7. How many arguments can a solidity function have?
+Function can take 16 parameters, otherwise if you exceeds the 16 parameter number else you run into a Stack too deep error. This limit is because the number of stack slots you can directly access is 16.
+
+
+8. How many storage slots does this use? uint64[] x = [1,2,3,4,5]? Does it differ from memory?
+Storage: It will occupy 3 slots.
+    -First slot: the size of the array.
+    -Second slot: the numbers 1, 2, 3 and 4 because four uint64 equals to one uint256, which is the size of a slot.
+    -Third slot: the number 5.
+
+Values of dynamic arrays are stored in slots that are computed using a Keccak-256 hash. So in this case, first slot will be slot zero, and second and third slots will be at the corresponding hashing location.
+
+In memory you can't have a dynamic size array, but if you create a fixed size array this way:
+    uint64[] memory x = new uint64[](5);
+    x[0] = 1;
+    x[1] = 2;
+    x[2] = 3;
+    x[3] = 4;
+    x[4] = 5;
+The array will occupy 6 memory slot:
+0x80: size of the array
+0xa0: 1
+0xc0: 2
+0xe0: 3
+0x100: 4
+0x120: 5
+
+
+9. Prior to the Shanghai upgrade, under what circumstances is returndatasize() more efficient than push zero?
+Prior to the Shanghai upgrade pushing a zero into the stack would cost 3 gas and would take 2 instructions to do it.
+Push1: 0x60
+zero: 0x00
+
+The Shanghai upgrade incorporated a new opcode called Push0 which consumes 2 gas and doesn't require any argument.
+Push0: 0x5f
+
+Returndatasize spends 2 gas and doesn't need any argument, so sometimes it was more efficient to use this opcode instead of pushing a 0 into the stack.
+Returndatasize: 0x30
+
+
+10. Why does the compiler insert the INVALID op code?
+The invalid opcode usually to indicate that something particularly bad or unexpected happened. It's equivalent to any other opcode not currently used by the compiler, but guaranteed to remain an invalid instruction. It's equivalent to REVERT (since Byzantium fork) with 0,0 as stack parameters, except that all the gas given to the current context is consumed.
+
+11. What is the difference between how a custom error and a require with error string is encoded at the EVM level?
+Custom errors are encoded the same way functions are, that means that the first 4 bytes are the error selector and the rest of the bytes are the arguments.
+In require with string error the string is directly encoded and returned, with no extra arguments. String are expensive and the more length it has the more expensive it becomes. Other difference of require is that it can't have dynamic arguments.
+
+When the length of the string is 31 bytes or less it’s stored in a single slot starting from the left side and the length * 2 is stored in the final byte on the right.
+For anything larger than 31 bytes the storage process is similar to an array. Where the slot of the string stores length * 2 + 1 and the data is stored via keccak256(slot) + i
+
+12. What is the kink parameter in the Compound DeFi formula?
+https://ianm.com/posts/2020-12-20-understanding-compound-protocols-interest-rates
+
+13. How can the name of a function affect its gas cost, if at all?
+In smart contracts, the order of the functions are based on their Method ID and the later the sort will consume more. Each position will have an extra 22 gas. This is why you should prioritize most used functions and reduce the number of functions and variables that are public.
+
+contract Test {
+    function b() public {
+    }
+    function a() public {
+    }
+}
+
+a: 0x0dbe671f => 125 gas
+b: 0x4df7e3d0 => 147 gas
+
+14. What is a common vulnerability with ecrecover?
+The vulnerability is called Signature malleability. An attacker can modify the parameters of a signature (v, r and s) and still get a different valid signature, without having access to the private key of the original signer. This happens because elliptic curves are symmetric, and for every value of v,r and s, there will be a different set of v, r and s that have the same relationship.
+
+The EIP-2 hardfork does invalidate signatures with a high s value but the precompiled contract ecrecover points to was left as is, meaning that individuals need to properly account for malleable signatures and sanitize them.
+This is why ecrecover() does not follow the recommended best practice for signature verification (It does not check for malleable signatures). s values that are part of accepted signatures should be checked to be in lower ranges.
+
+ecrecover: code that utilizes the ecrecover() mechanism directly should primarily validate that the resulting address is not equal to the 0 address and secondarily validate that the v value is either 27 or 28 and that the s value of the signature is lower-than-or-equal-to the value of (n / 2) of the secp256k1 bonding curve.
+
+Open Zeppeling ECDSA library bug: The vulnerability existed, because it was possible to submit an EIP-2098 compact signature to bypass signature check. This is already fixed.
+
+Instead of ecrecover(), OpenZeppelin’s ECDSA library should be used instead because it solves the signature malleability problems.
+
+
 15. What is the difference between an optimistic rollup and a zk-rollup?
-16. How does EIP1967 pick the storage slots, how many are there, and what do they represent? x
-17. How much is one Sazbo of ether? x
-18. Under what circumstances would a smart contract that works on Etheruem not work on Polygon or Optimism? (Assume no dependencies on external contracts) x
+
+Property                 | Optimistic | ZK-Rollup
+
+Proof                    | Fraud Proof (Users would have to challenge a transaction bundle to determine the invalidity of transactions)      | Validity proof (the operator is responsible for producing validity proofs to ensure the accuracy of the changes made)
+
+Fixed gas cost           | ~40,000 (a lightweight transaction that mainly just changes the value of the state root)  | 500,000 (verification of a ZK-SNARK is computationally intensive)
+
+Withdraw period          | ~1 week (withdrawals need to be delayed to give time for someone to publish a fraud proof and cancel the withdrawal if it is fraudulent) |   Very fast (just wait for the next batch)
+
+Complexity of technology | Low       |    High (ZK-SNARKs are very new and mathematically complex technology)
+
+Generalizability         | Easier (general-purpose EVM rollups are already close to mainnet) |  Harder (ZK-SNARK proving general-purpose EVM execution is much harder than proving simple computations, though there are efforts (eg. Cairo) working to improve on this)
+
+Per-transaction on-chain gas costs | Higher |   Lower (if data in a transaction is only used to verify, and not to cause state changes, then this data can be left out, whereas in an optimistic rollup it would need to be published in case it needs to be checked in a fraud proof)
+
+Off-chain computation costs        | Lower (though there is more need for many full nodes to redo the computation) |    Higher (ZK-SNARK proving especially for general-purpose computation can be expensive, potentially many thousands of times more expensive than running the computation directly)
+
+
+16. How does EIP1967 pick the storage slots, how many are there, and what do they represent?
+EIP1967 choose a pseudo-random slot of the storage calculated using the keccak hash of a string. There are 3 storage slots that the EIP1967 uses this way:
+
+Logic contract address slot: holds the address of the logic contract that this proxy delegates to:
+bytes32(uint256(keccak256('eip1967.proxy.implementation')) - 1).
+
+Beacon contract address slot: holds the address of the beacon contract this proxy relies on (fallback). SHOULD be empty if a logic address is used directly instead:
+bytes32(uint256(keccak256('eip1967.proxy.beacon')) - 1).
+
+Admin address slot: holds the address that is allowed to upgrade the logic contract address for this proxy (optional):
+bytes32(uint256(keccak256('eip1967.proxy.admin')) - 1).
+
+In a Beacon proxy pattern, the proxy contract doesn’t hold the implementation address in storage but the address of a UpgradeableBeacon contract, which is where the implementation address is actually stored and retrieved from. The upgrade operations that change the implementation contract address are then sent to the beacon instead of to the proxy contract, and all proxies that follow that beacon are automatically upgraded.
+
+17. How much is one Sazbo of ether?
+1 Sazbo is 0.000001 ETH and 1,000,000 Szabo	is 1 ETH
+
+18. Under what circumstances would a smart contract that works on Ethereum not work on Polygon or Optimism? (Assume no dependencies on external contracts)
+For example if one opcode is valid in one blockchain and not valid in another, like a new opcode added recently 0x5f.
+
+
 19. How can a smart contract change its bytecode without changing its address?
-20. What is the danger of putting msg.value inside of a loop? x
-21. Describe the calldata of a function that takes a dynamic length array of uint128 when uint128[1,2,3,4] is passed as an argument x
-22. Why is strict inequality comparisons more gas efficient than ≤ or ≥? What extra opcode(s) are added? x
-23. What is the relationship between variable scope and stack depth? x
-24. What is an access list transaction? x
+In order to accomplish a metamorphic contract we need:
+-The first smart contract to be deployed with create2
+-The constructor of this contract needs to make an external call to get the final bytecode (so the actual bytecode is stored in another contract).
+-To have the ability to selfdestruct.
+-Once the first smart contract is destroyed, we change the bytecode inside the external contract and re-deploy the same first contract again with create2.
+
+Create2 takes as parameters the following arguments:
+-a constant (0xff)
+-the deployer address
+-a salt
+-the deployment code
+
+Because the deployment code is identical, we're going to have the same address for this second contract but with another final bytecode.
+
+20. What is the danger of putting msg.value inside of a loop?
+Using msg.value inside a loop is dangerous because this might allow the sender to “re-use” the msg.value.
+
+This can show up with payable multicalls. Multicalls enable a user to submit a list of transactions to avoid paying the 21,000 gas transaction fee over and over. However, msg.value gets “re-used” while looping through the functions to execute, potentially enabling the user to double spend.
+
+function batchBuy(address[] memory addr) external payable{
+    for (uint i = 0; i < addr.length; i++) {
+        buy1NFT(addr[i])
+    }
+}
+function buy1NFT(address to) internal {
+    if (msg.value < 1 ether) { revert("not enough ether") }
+    nft[numero] = address;
+}
+
+In the function batch-buy() we see that we can buy lot of NFTs at once. But the issue is that in every iteration of a for loop, Buy1NFT() is called. It verifies that msg.value is at least 1 ether, but don’t subtract 1 ether from the smart contract.
+
+As a result a malicious party can send only 1 ETH to the smart contract and put x addresses in the “addr” argument (or x times my address) to get x NFTs for only 1 ETH.
+
+
+21. Describe the calldata of a function that takes a dynamic length array of uint128 when uint128[1,2,3,4] is passed as an argument
+
+0x66454c64                                                          // function selector
+0000000000000000000000000000000000000000000000000000000000000020    // offset from here (skip the next 32 bytes)
+0000000000000000000000000000000000000000000000000000000000000004    // length
+0000000000000000000000000000000000000000000000000000000000000001    // first value
+0000000000000000000000000000000000000000000000000000000000000002    // second value
+0000000000000000000000000000000000000000000000000000000000000003    // third value
+0000000000000000000000000000000000000000000000000000000000000004    // forth value
+
+22. Why is strict inequality comparisons more gas efficient than ≤ or ≥? What extra opcode(s) are added?
+Strict inequality is more efficient because you only need to use one opcode:
+0x14-EQ (3 gas)
+
+if you want to check ≤ or ≥ you would need to use 3 opcodes:
+0x14-EQ (3 gas)
+0x10-LT or 0x11-GT (3 gas)
+0x17-OR (3 gas)
+This happens because there is no opcode that represents the operations LTE or GTE
+
+
+23. What is the relationship between variable scope and stack depth?
+
+
+24. What is an access list transaction?
+An access list transaction (or EIP-2930 transaction) is transaction that has a list of addresses and storage keys that it plans to access.
+
+The Berlin hard fork raised the “cold” cost of account access opcodes (such as BALANCE, all CALL(s), and EXT*) to 2600 and raised the “cold” cost of state access opcode (SLOAD) from 800 to 2100 while lowering the “warm” cost for both to 100.
+
+An EIP-2930 transaction is carried out the same way as any other transaction, except that the cold storage cost is paid upfront with a discount, rather during the execution of the SLOAD operation. It does not require any modifications to the Solidity code and is purely specified client-side.
+
+The fee prepays the cold access of the storage slot so that during the actual execution, only the warm fee is paid. When the storage keys are known in advance, Ethereum node clients can pre-fetch storage values, effectively lowering the computational resource overhead.
+
+EIP-2930 does not prevent storage access outside the access list; putting an address-storage combination in the access list is not a commitment to use it. However, the result would be prepaying the cold storage load for no purpose.
+
+
 25. Why is it necessary to take a snapshot of balances before conducting a governance vote?
+
+Because the voting power is retrieved from past snapshots rather than current balance. So if you don't take a snapshop before a governance vote, it will use the last snapshop which will probably be outdated.
+
+The snapshopts solve the problem of double voting. If votes are weighed by the number of tokens someone holds, then a malicious actor can use their tokens to vote, then transfer the tokens to another address, vote with that, and so forth.
+
 26. How can a transaction be executed without a user paying for gas?
-27. In solidity, without assembly, how do you get the function selector of the calldata? x
+
+Traditionally, a blockchain transaction would require the person sending the transaction to pay for gas. Meta-transactions allow anyone to interact with the blockchain without holding tokens to pay for transaction fees. This is achieved by separating the transaction's sender from the gas payer. This means that one person is allowed to send a transaction and have the transaction finalized and paid for by a totally separate entity.
+
+A smart contract wallet (Account Abstraction - ERC4337) such as Sequence provides an effective means of implementing meta-transactions.
+Gasless transactions are the most common type of meta transaction, meaning that users do not have to pay gas at all. This allow your users perform key actions in your app or game without the barriers of having to fund their wallet or pay a fee.
+
+27. In solidity, without assembly, how do you get the function selector of the calldata?
+Using msg.sig
+
 28. How is an Ethereum address derived?
+We need to separate between EOA and Contracts.
+
+EOA address are created by taking the last 20 bytes of the Keccak-256 hash of the public key and representing it as a hexadecimal number.
+
+Contract address can be created in two different ways.
+Create opcode: It will use the deployer address and the nonce in order to derive the contract address
+Create2 opcode: It will use a constant (0xff), the deployer address, a salt, and the deployment code to derive the contract address
+
 
 ## Advanced
 
