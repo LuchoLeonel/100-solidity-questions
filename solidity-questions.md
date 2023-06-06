@@ -565,13 +565,64 @@ Create2 opcode: It will use a constant (0xff), the deployer address, a salt, and
 
 ## Advanced
 
-1. What addresses to the ethereum precompiles live at? x
-2. How does Solidity manage the function selectors when there are more than 4 functions? x
-3. How does ABI encoding vary between calldata and memory, if at all? x
-4. What is the difference between how a uint64 and uint256 are abi-encoded in calldata? x
-5. What is read-only reentrancy? x
-6. If you deploy an empty Solidity contract, what bytecode will be present on the blockchain, if any? x
-7. How does the EVM price memory usage? x
+1. What addresses to the ethereum precompiles live at?
+Ethereum precompiles behave like smart contracts built into the Ethereum protocol. The nine precompiles live in addresses 0x01 to 0x09. Precompiles do not execute inside a smart contract, they are part of the Ethereum client specification. Most precompiles don’t have a solidity wrapper (with ecrecover being the sole exception). You’ll need to call the address directly with addressOfPrecompile.staticcall(…) or use assembly. Although none of the precompiled contracts are state changing, the solidity function that calls them cannot be pure because the solidity compiler has no way of inferring that a staticcall won’t change the state.
+
+Address 0x01: ecRecover
+ECRecover is the precompile for recovering an address from a hash and a digital signature for that hash, i.e. determining who signed it if the signature is valid. 
+
+Address 0x02 and 0x03: SHA-256 and RIPEMD-160
+Both of these precompiles will hash the bytes supplied in the calldata. Why does Ethereum support SHA-256 and RIPEMD-160? Bitcoin makes heavy use of SHA256 the way Ethereum makes heavy use of keccak256. However, Bitcoin addresses use RIPEMD-160 to hash the public key and make the public address more compact.
+
+Address 0x04: Identity
+The identity precompile copies one region of memory to another. Ethereum doesn’t have a “memcopy” opcode (an opcode to copy one region in memory to another). Normally, you’d have to MLOAD a word of memory onto the stack and then MSTORE it to copy it, and you’d have to do the copy word by word. With the identity precompile, you can copy a contiguous set of 32 byte words in one go, rather than one byte at a time.
+
+Address 0x05: Modexp
+The address 0x05 implements the formula base**exp % mod. It returns the result from the given data.
+
+Address 0x06 and 0x07 and 0x08: ecAdd, ecMul, and ecPairing (EIP-196 and EIP-197)
+These precompiles are used to make zero knowledge proof cryptography more efficient. In fact, you can see all three precompiles being used in the Tornado Cash zero knowledge proof verifier:
+
+Elliptic Curve Addition: staticcall to address(6)
+Elliptic Curve Multiplication: staticcall to address(7)
+Elliptic Curve Pairing: static call to address(8)
+
+Address 0x09: Blake2 (EIP-152)
+The Blake2 hash is the preferred hash of zcash. Similar to SHA256 and RIPEMD-160, Blake2 was added to enable Ethereum to validate claims about transactions on that blockchain. This precompile was added in EIP152.
+
+
+2. How does Solidity manage the function selectors when there are more than 4 functions?
+
+
+3. How does ABI encoding vary between calldata and memory, if at all?
+The main difference is that dinamic types in calldata also have an offset (where the variable start). Also, in memory you can't have a dynamic size array.
+
+4. What is the difference between how a uint64 and uint256 are abi-encoded in calldata?
+There is no difference neither in calldata nor memory, the variables are padded in such a way that they are a 32 bytes number. The only difference will be in storage.
+
+
+5. What is read-only reentrancy?
+The read-only reentrancy is a reentrancy scenario where a view the function is reentered, which in most cases is unguarded as it does not modify the contract’s state. However, if the state is inconsistent, wrong values could be reported. While the reentered contract cannot be affected by its view function, others reading the contract’s state can. As In result, other protocols blindly relying on a return value (e.g. from Oracles or Price Feeds) can be tricked into reading the wrong state to perform unwanted actions.
+
+
+6. If you deploy an empty Solidity contract, what bytecode will be present on the blockchain, if any?
+0x6080604052600080fdfea264697066735822122005587ff223b480866e9d3010eed2b9bec42b505b79181e2348263f4045a036a864736f6c63430008130033
+
+It will set the free memory pointer and will revert. Then, it will set an explicit invalid opcode. After that, it will be same opcodes that will never be reached by the contract's execution.
+
+
+7. How does the EVM price memory usage?
+Memory usage has a static gas cost of 3 and a dynamic cost.
+Memory expansion may be triggered when the byte offset (modulo 32) accessed is bigger than previous offsets. If a larger offset trigger of memory expansion occurs, the cost of accessing the higher offset is computed and removed from the total gas available at the current call context. When a memory expansion is triggered, only the additional bytes of memory must be paid for. The memory_byte_size can be obtained with opcode MSIZE.
+
+
+static_gas = 3
+
+memory_cost = (memory_size_word ** 2) / 512 + (3 * memory_size_word)
+memory_size_word = (memory_byte_size or MSIZE + 31) / 32
+memory_expansion_cost = new_memory_cost - last_memory_cost
+dynamic_gas = memory_expansion_cost
+
 8. What is stored in the metadata section of a smart contract? x
 9. What is the uncle-block attack from an MEV perspective? x
 10. How do you conduct a signature malleability attack? x
