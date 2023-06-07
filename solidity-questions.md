@@ -321,7 +321,7 @@ The approve() function allows a another person to be able to spend N amount of t
 If the malicious party already has an approve from the owner, and the owner wants to reduce the amount of token the malicious party can spend, the owner can send a new approve for a lower amount of token. Here is where the malicious party can take advantage of this. Using the insertion attack, the attacker could front-run the new approve transaction and spend the old value before the new value is set, and then additionally spend the new amount.
 
 3. What opcode accomplishes address(this).balance?
-You need to call first opcode ADDRESS (30) and then call opcode BALANCE (31).
+You need to call first opcode SELFBALANCE (47).
 
 4. What is an anonymous Solidity event?
 Events can be marked as anonymous, in which case they will not have a selector. Because of this they cannot be easily searched for, or decoded with certainty unless you have the specific contract ABI or the source code of the contract.
@@ -606,9 +606,14 @@ The read-only reentrancy is a reentrancy scenario where a view the function is r
 
 
 6. If you deploy an empty Solidity contract, what bytecode will be present on the blockchain, if any?
+This is the bytecode, lets break it down.
 0x6080604052600080fdfea264697066735822122005587ff223b480866e9d3010eed2b9bec42b505b79181e2348263f4045a036a864736f6c63430008130033
 
-It will set the free memory pointer and will revert. Then, it will set an explicit invalid opcode. After that, it will be same opcodes that will never be reached by the contract's execution.
+It will set the free memory pointer and will revert. Then, it will set an explicit invalid opcode.
+0x6080604052600080fdfe
+
+This is the contract metadata
+a264697066735822122005587ff223b480866e9d3010eed2b9bec42b505b79181e2348263f4045a036a864736f6c63430008130033
 
 
 7. How does the EVM price memory usage?
@@ -623,22 +628,148 @@ memory_size_word = (memory_byte_size or MSIZE + 31) / 32
 memory_expansion_cost = new_memory_cost - last_memory_cost
 dynamic_gas = memory_expansion_cost
 
-8. What is stored in the metadata section of a smart contract? x
-9. What is the uncle-block attack from an MEV perspective? x
-10. How do you conduct a signature malleability attack? x
+8. What is stored in the metadata section of a smart contract?
+https://www.rareskills.io/post/solidity-metadata
+a26469706673582212203082dbb4f4db7e5d53b235f44d3e38f839dc82075e2cda9df05b88e6585bca8164736f6c6343000814
+
+This gives us a clue about what this data contains: an IPFS hash and the solidity compiler version.
+69706673 => ipfs
+12203082dbb4f4db7e5d53b235f44d3e38f839dc82075e2cda9df05b88e6585bca81 => ipfs hash
+736f6c63 => solc
+000814 => version 0.8.18 in hex
+
+This metadata adds an extra 53 bytes to the deployment cost, which translates to an extra 10,600 gas (200 per bytecode) + the calldata cost (16 gas per non-zero bytes, 4 gas per zero-byte). This translates to up to 848 additional gas in calldata cost.
+
+So why include it? This enables smart contract code to be rigorously verified. The metadata JSON the compiler output includes a hash of the source code. So if the source code changes a little bit, the the metadata JSON file will change and its IPFS hash will change.
+
+9. What is the uncle-block attack from an MEV perspective?
+Uncle-bandit attacks refer to attacks in which validators notice transactions in rejected blocks (uncles) that are not confirmed and selectively bring one or few of them back into the main blockchain to profit from them.
+
+In Ethereum occasionally two blocks are mined at roughly the same time, and only one block can be added to the chain. The other gets "uncled" or orphaned. Anyone can access transactions in an uncled block and some of the transactions may not have ended up in the non-uncled block. In a way some transactions end up in a sort of mempool like state: they are now public as a part of the uncled block and perhaps still valid too.
+
+A Sandwicher's bundle was included in an uncled block. An attacker saw this, grabbed only the Buy part of the Sandwich, threw away the rest, and added an arbitrage after. The attacker then submitted that as a bundle, which was then mined.
+
+10. How do you conduct a signature malleability attack?
+All transactions need to be signed before being included in the blockchain. An attacker can modify the signature's parameters (v, r and s) and still get a different valid signature, without having access to the private key of the original signer. This happens because elliptic curves are symmetric, and for every value of v,r and s, there will be a different set of v, r and s that have the same relationship.
+
+Lets take a look at an example to understand the vulnerability better.
+
+Suppose Alice initiates a transaction and signed it with her private key. The transaction is propagated throughout the network to be mined and included in the blockchain. Among the receivers is Bob who is a menace, and he wants to perform a transaction malleability attack against Alice. He will modify the v, r and s parameters to get a valid new signature and use front running techniques.
+
+However, Bob cannot modify the transaction details such as the amount, receiver or the sender. No extra money will be deducted from Alice’s wallet and Bob will not get any money from Alice either. This is because all he can modify is the transaction signature that is included in the blockchain. So, what is the point then?
+
+Lets say Alice wants to buy an NFT for 1 ether. Her wallet application will create a transaction and sign it for her. The wallet application will then look for her transaction in the blockchain to check if it was successful. But Bob has changed the signature of the transaction and this modified transaction was mined into a block and included in the ledger.
+
+Although the payment went through, Alice’s wallet never got the confirmation, so it initiates the transaction again. This process can go on and on until all funds are exhausted.
+
+
 11. Under what circumstances do addresses with leading zeros save gas and why?
-12. What is the difference between payable(msg.sender).call{value: value}(””) and msg.sender.call{value: value}(””)? x
-13. How many storage slots does a string take up? x
-14. How does the --via-ir functionality in the Solidity compiler work? x
-15. Are function modifiers called from right to left or left to right, or is it non-deterministic? x
+https://medium.com/coinmonks/on-efficient-ethereum-addresses-3fef0596e263
+
+Call data
+First, let’s look at Gtxdatazero: it costs 4 gas for every zero byte of transaction data. Compare that to the cost of Gtxdatanonzero: 68 gas, or 17 times as expensive. As a consequence, every time a zero byte is used in msg.data in place of a non-zero byte, it saves 64 gas.
+
+The hamming weight of msg.sender makes no difference, but it does in msg.data.
+For example, if you're using the transfer(_to, _amount) method on an ERC20 token, if the receiver address _to contains a lot of zeroes, it will save you gas executing the transaction. The ordering of the zero bytes has no bearing on the benefit derived — from this particular optimization, at least — only the total number of zero bytes used to replace a corresponding non-zero byte.
+
+Next, consider Gsset: this and Gsreset both deal with the SSTORE opcode and set 32-byte words into state, and it costs 20,000 gas to store any non-zero data for the first time. Once the word has been stored, it’ll cost another 200 gas every time it’s retrieved via SLOAD, which is also not cool.
+
+When it comes to addresses in particular, we can pull off some nice gas savings as follows: if the address has at least four leading zero bytes (or eight leading zeroes in hex-encoded format), then each address will only need to take up 16 bytes. If you do the math, taking covariance into account when integrating over the partial differential equations and remembering to carry the seven, we find that two addresses can be packed into one sweet 32-byte package.
+
+
+12. What is the difference between payable(msg.sender).call{value: value}(””) and msg.sender.call{value: value}(””)?
+Currently, msg.sender is considered an address payable by the Solidity compiler. Casting msg.sender doesn't modify anything when making a call.
+The casting is only relevant if you intend to save the result of payable(msg.sender) into another variable of type address payable.
+
+13. How many storage slots does a string take up?
+Solidity string is designed to hold ASCII printable characters only, from the range 0x20 to 0x7E, which would be in decimal from 32 to 126. So each character will take 1 byte. Also, the length of the string is multiplied for 2 and stored with the characters.
+
+For strings that have 31 letters or less they will be stored in one slot along with the (length * 2) which will be at the right. string + (length * 2)
+If the string takes more than 31 bytes, the storage process is similar to an array.
+The length is saved in the corresponding storage slot and the string is saved in a storage slot computed using the keccak hash of the storage slot number where the length is stored. So:
+31 bytes <= 1 slot
+32 bytes = 2 slots
+33 bytes >= 3 slots and so on...
+
+
+14. How does the --via-ir functionality in the Solidity compiler work?
+https://docs.soliditylang.org/en/v0.8.17/ir-breaking-changes.html
+Solidity can generate EVM bytecode in two different ways: Either directly from Solidity to EVM opcodes (“old codegen”) or through an intermediate representation (“IR”) in Yul (“new codegen” or “IR-based codegen”).
+
+The IR-based code generator was introduced with an aim to not only allow code generation to be more transparent and auditable but also to enable more powerful optimization passes that span across functions.
+
+You can enable it on the command line using --via-ir or with the option {"viaIR": true} in standard-json.
+
+15. Are function modifiers called from right to left or left to right, or is it non-deterministic?
+The modifiers will be executed in the order they are defined, so from left to right.
+
 16. If you do a delegatecall to a contract and the opcode CODESIZE executes, which contract size will be returned?
-17. Why is it important to ECDSA sign a hash rather than an arbitrary bytes32? x
-18. Describe how symbolic manipulation testing works. x
-19. What is the most efficient way to copy regions of memory? x
-20. How can you validate on-chain that another smart contract emitted an event, without using an oracle? x
-21. When selfdestruct is called, at what point is the Ether transferred? At what point is the smart contract's bytecode erased? x
-22. Why did Solidity deprecate the "years" keyword? x
-23. What does the verbatim keyword do, and where can it be used? x
-24. How much gas can be forwarded in a call to another smart contract? x
-25. What does an int256 variable that stores -1 look like in hex? x
-26. What is the use of the signextend opcode? x
+It will retrieve the contract size of the implementation (the contract that is being called).
+
+17. Why is it important to ECDSA sign a hash rather than an arbitrary bytes32?
+Because when signing the hash of a transaction you have a proof that the integrity of the data you are signing has not been compromised and that this specific signature only work with that exact transaction.
+
+18. Describe how symbolic manipulation testing works.
+https://hackmd.io/@SaferMaker/EVM-Sym-Exec
+https://ethereum.stackexchange.com/questions/145303/symbolic-execution-vs-fuzz-testing-whats-the-difference
+
+Fuzz tests: are the process of providing random data as inputs during testing to break something. Much faster to do, but less precise. Fuzzing tries random values, and if you change the number of runs from 2000 to something much less like 10, it's highly likely foundry won't find our edge case.
+
+Symbolic execution:  is a technique for exploring all possible execution paths of a program without actually executing it by arriving at a mathematical expression that describes the system. It works by treating variables in the program as symbolic values, rather than concrete values. To do symbolic execution, we'd want to take our function and replicate it as a mathematical expression so the tool can look for a path to break the asserts. This is also an example of formal verification where we used math to prove or disprove a model works in an expected way. Much slower to do, but more precise. Examples of tools are manticore or z3.
+
+Formal verification techniques, such as model checking and symbolic execution, are generally more efficient than regular analysis of smart contract code (performed during testing or auditing). This is because formal verification relies on symbolic values to test assertions ("what if a user tries to withdraw n ether?") unlike testing which uses concrete values ("what if a user tries to withdraw 5 ether?").
+
+19. What is the most efficient way to copy regions of memory?
+If we want to copy an entire region of memory the most efficient way to do it is using the precompiled contract at address 0x04, also called the “memcopy” opcode.
+
+20. How can you validate on-chain that another smart contract emitted an event, without using an oracle?
+ The Log and its event data is not accessible from within contracts (not even from the contract that created them).
+
+21. When selfdestruct is called, at what point is the Ether transferred? At what point is the smart contract's bytecode erased?
+
+22. Why did Solidity deprecate the "years" keyword?
+The keyword years is now disallowed due to complications and confusions about leap years. So, because years is not an static number like 365 and it can be 366 in leap years it is better if the developers expecify what a year means for that particular contract.
+
+23. What does the verbatim keyword do, and where can it be used?
+The solidity compiler isn’t very efficient. Often for elementary operations, the Solidity compiler will add a ton of unnecessary opcodes. You can use inline assembly, but the solidity compiler still adds many checks and unnecessary opcodes that just cost more gas.
+
+The set of verbatim... builtin functions lets you create bytecode for opcodes that are not known to the Yul compiler. It also allows you to create bytecode sequences that will not be modified by the optimizer.
+
+In short, verbatun will allow us to add our own bytecode to an already compiled contract. But there is a small catch. Verbatim doesn’t work in solidity, so we will first have to compile our contract down to YUL and then add the bytecode with verbatim.
+
+The functions are verbatim_<n>i_<m>o("<data>", ...), where
+-n is a decimal between 0 and 99 that specifies the number of input stack slots / variables
+-m is a decimal between 0 and 99 that specifies the number of output stack slots / variables
+-data is a string literal that contains the sequence of bytes
+
+If you for example want to define a function that multiplies the input by two, without the optimizer touching the constant two, you can use
+
+let x := calldataload(0)
+let double := verbatim_1i_1o(hex"600202", x)
+
+24. How much gas can be forwarded in a call to another smart contract?
+It doesn't have a limit for the gas to forwarded in a call but if the transaction spends more gas than the block gas limit it will never be validated. Right now the block gas limit is 30 million gas.
+
+25. What does an int256 variable that stores -1 look like in hex?
+0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+
+26. What is the use of the signextend opcode?
+The concept of extending the length of an unsigned integer is rather trivial, for instance: Take the number 01010101 for example. It is 1 byte in length. Suppose that we want to represent it as 2 bytes. All we need to do is add eight 0's to our number like so: 00000000 01010101. Now it is 2 bytes.
+
+However, the left most bit of a signed integer is the sign bit, we must take care to include the sign bit when extended a signed integer or we will alter it's original value. Let's say I wanted to extend the number we used above -28 in binary 11100100 that same way we extended the unsigned integer, like so:
+
+00000000 11100100
+
+Now our signed integer is no longer -28 but rather 228. Thus, we need a mechanism for extending the signed integer while preserving the sign bit. It's not that actually, all we need to do is instead of appending eight 0's, we'll append eight of the sign bits. In this case the sign bit is 1. So we'll append eight 1's 1 like so:
+
+11111111 11100100
+
+Now we have the value -28 expressed in two bytes instead of 1.
+
+So why is there a special opcode for this? This could get low level very fast but the process of extending the sign of an signed integer would need several opcodes. I'll briefly explain how I would do it without the SIGNEXTEND opcode:
+-Bit mask to get the left most bit
+-Check value of left most bit
+-Append the value of the left most bit
+
+Because of this it is necessary this special opcode.
+
