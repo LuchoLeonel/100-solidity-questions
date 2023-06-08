@@ -7,7 +7,7 @@ Public: can be access both from ouside and inside the contract.
 Private: similar to internal but it can't be accessed from derived contracts.
 
 2. Approximately, how large can a smart contract be?
-The Spurious Dragon hard-fork introduced EIP-170 which added a smart contract size limit of 24.576 kb. This limit was introduced to prevent  denial-of-service (DOS) attacks. The impact of a contract call for Ethereum nodes increases disproportionately depending on the called contract code's size. Originally, one natural contract size limit was the block gas limit. Obviously a contract needs to be deployed within a transaction that holds all of the contract's bytecode. The issue in that case though is that the block gas limit changes over time and is in theory unbounded. Now, after Ethereum’s London hardfork the block gas limit is 30 million.
+The Spurious Dragon hard-fork introduced EIP-170 which added a smart contract size limit of 24.576 kb. This limit was introduced to prevent denial-of-service (DOS) attacks. Any call to a contract is relatively cheap gas-wise. However, the impact of a contract call for Ethereum nodes increases disproportionately depending on the called contract code's size. Whenever you have such a situation where the attacker requires few resources to cause a lot of work for others, you get the potential for DOS attacks. Originally, one natural contract size limit was the block gas limit. Obviously a contract needs to be deployed within a transaction that holds all of the contract's bytecode. The issue in that case though is that the block gas limit changes over time and is in theory unbounded. Now, after Ethereum’s London hardfork the block gas limit is 30 million.
 
 3. What is the difference between create and create2?
 Create: use the deployer address and the nonce to calculate the new contract's address
@@ -91,7 +91,7 @@ There are 1 billion wei in one gwei and there are 10^9 or 1,000,000,000 gwei in 
 1 gwei ^ 2 is 1 ether
 
 14. How much is 1 wei of Ether?
-1 ether is 10^18 in wei
+1 ether is 10^18 in wei. 1.000.000.000.000.000.000
 
 15. What is the difference between assert and require?
 assert is commonly used to validate the code is working as expected. On the other hand, require is used to ensure that the function’s input parameters are valid, to check response from external contract or to check a condition before state update.  Use require as early as possible of the function because in case of failure, require does return only unused gas. In assert when the condition is false it will consume all gas remaining gas and reverts all the changes made.
@@ -194,6 +194,11 @@ abi.encodePacked can result in hash collisions when passing more than one dynami
 Since abi.encodePacked() packs all elements in order (using the minimal space required) regardless of whether they're part of an array, you can move elements between arrays and, so long as all elements are in the same order, it will return the same encoding. In a signature verification situation, an attacker could exploit this by modifying the position of elements in a previous function call to effectively bypass authorization.
 If you are using more than one dynamic data type, abi.encode should be used instead.
 
+Example:
+    bytes32 hash = keccak256(abi.encodePacked(admins, regularUsers));
+    address signer = hash.toEthSignedMessageHash().recover(signature);
+    require(isAdmin[signer], "Only admins can add users.");
+
 11. How does Ethereum determine the BASEFEE in EIP-1559?
 Every block has a base fee which acts as a reserve price. To be eligible for inclusion in a block the offered price per gas must at least equal the base fee. The base fee is determined by the blocks before it - making transaction fees more predictable for users. When the block is mined this base fee is "burned", removing it from circulation.
 
@@ -206,8 +211,12 @@ The first one is specifying how much it costs to access a variable for the first
 Modifying a storage slot from a zero value to a non-zero one costs 20,000. While storing the same non-zero value or setting a non-zero value to zero costs 5,000. However, in the last scenario when a non-zero value is set to zero, a refund of 15,000 will be given.
 
 13. How does an AMM price assets?
-The prices of assets on an AMM automatically change depending on the demand. For example, a liquidity pool could hold ten million dollars of ETH and ten million dollars of USDC. A trader could then swap 500k dollars worth of their own USDC for ETH, which would raise the price of ETH on the AMM.
-Automated market makers (AMMs) allow digital assets to be traded without permission and automatically by using liquidity pools instead of a traditional market of buyers and sellers.
+Automated market makers (AMMs) allow digital assets to be traded without permission and automatically by using liquidity pools instead of a traditional market of buyers and sellers. A liquidity pool is a shared pot of tokens. Users supply liquidity pools with tokens and the price of the tokens in the pool is determined by a mathematical formula. Liquidity providers normally earn a fee for providing tokens to the pool. This fee is paid by traders who interact with the liquidity pool.
+
+tokenA_balance(p) * tokenB_balance(p) = k
+The constant, represented by “k” means there is a constant balance of assets that determines the price of tokens in a liquidity pool. 
+
+For example, if an AMM has ether (ETH) and bitcoin (BTC), two volatile assets, every time ETH is bought, the price of ETH goes up as there is less ETH in the pool than before the purchase. Conversely, the price of BTC goes down as there is more BTC in the pool. The pool stays in constant balance, where the total value of ETH in the pool will always equal the total value of BTC in the pool. Only when new liquidity providers join in will the pool expand in size. 
 
 14. What is the effect on gas of making a function payable?
 In the payable functions, the EVM doesn’t have to validate that msg.value is zero, as it is totally possible to send zero ether or more to such a function, thus the validation is irrelevant. Because of that, payable functions result in less computations, which decreases gas usage.
