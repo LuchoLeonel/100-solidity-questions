@@ -239,20 +239,16 @@ It is located in memory at position 0x40.
 19. What function modifiers are valid for interfaces?
 None custom modifier.
 
-20. What is the difference between memory and calldata in a function argument?
+20. What is the difference between memory and calldata in a function argument?nj  
 Memory is reserved for variables that are defined within the scope of a function and cannot be accessed outside this scope. Calldata is an immutable, temporary location where function arguments are stored.
 -Calldata can only be used in function arguments and not in function logic.
 -One key difference is that memory can be modified by the function, while calldata cannot. This means that if you want to modify a function argument, you must first copy it into memory.
 -It is generally cheaper to load variables directly from calldata, rather than copying them to memory. Only use memory if the variable needs to be modified.
 
 21. Describe the three types of storage gas costs.
-If the value of the slot changes from 0 to 1 (or any non-zero value), the cost is:
-22100 if the storage key wasn’t accessed
-20000 if it was
-If the value of the slot changes from 1 to 2 (or any other non-zero value), the cost is:
-5000 if the storage key wasn’t accessed
-2900 if it was
-If the value of the slot changes from 1 (or any non-zero value) to 0, the cost is the same as the previous item, plus the refund.
+If the value of the slot changes from 0 to 1 (or any non-zero value), the cost is 20.000 gas
+If the value of the slot changes from 1 to 2 (or any other non-zero value), the cost is 5.000 gas.
+If the value of the slot changes from 1 (or any non-zero value) to 0, the cost is the same as the previous item, plus the refund of 15.000
 If the value was previously modified during the same transaction, all the subsequent SSTOREs cost 100.
 
 22. Why shouldn’t upgradeable contracts use the constructor?
