@@ -261,8 +261,24 @@ The original proxies included in OpenZeppelin followed the Transparent Proxy Pat
 While both of these share the same interface for upgrades, in UUPS proxies the upgrade is handled by the implementation, and can eventually be removed. Transparent proxies, on the other hand, include the upgrade and admin logic in the proxy itself. This means TransparentUpgradeableProxy is more expensive to deploy than what is possible with UUPS proxies.
 
 24. What danger do ERC777 tokens pose?
-ERC777 introduces a call to the contract that it's being transferred the tokens before actually transfer them.
+ERC777 introduces a call to the contract that transfers the tokens before actually transfer them.
 In 2020 imBTC Uniswap Pool was drained for ~$300k in ETH. The attacker leverages this call to the contract that receives the tokens to make a reentrancy to the pool, in such a way that this person can use a small amount of ETH to swap out most of the tokens. This is achiavable because the “token_reserve” value will not be updated in consecutive token exchanges, leading to the violation of the “xy=k” setting of Uniswap. The attacker could sell tokens at a much better rate to drain the liquidation pool.
+
+There is just one fundamental feature of the ERC777 that you need to be aware of: the ERC777 hooks. In any transfer of tokens, an ERC777 contract is basically going to:
+-Call the sender of tokens – in our case, Alice.
+-Execute the transfer
+-Call the recipient of tokens
+
+This means that now the tokenToEthInput function from the pool actually:
+-Calculates the exact exchange rate (calling getInputPrice)
+-Sends Alice’s contract the corresponding Ether, reducing the exchange’s ETH reserves
+-Calls Alice’s contract
+-Transfers Alice’s tokens to the exchange, increasing the exchange’s token reserves
+
+In (3), Alice gets total control of the situation. It’s fundamental that you understand that at this point:
+-The exchange’s ETH reserves were already decreased
+-The exchange’s token reserves were not yet increased
+-Alice’s contract gets to decide what to do now 👿
 
 25. What is a bonding curve?
 A bonding curve is a mathematically defined relationship between price and supply. In short, as the supply increases, so does the price. This is somewhat counter-intuitive to traditional models, but the method is for each subsequent buyer of a token to pay a slightly higher price than the previous buyer and a lower price than any subsequent buyer. BCOs support sustained organic growth. New tokens are created by the contract when demand is there, escalating in price each time. By sidestepping the requirement of setting the initial price, it stops vast swathes of a token being picked up at a particular price point and then subsequently dumped. It also removes the need for exchanges: As a fully automated market maker (AMM), bonding curves not only allow for the calculation of a token’s price, but also enable the investor to simply buy or sell their tokens right there.
@@ -307,11 +323,12 @@ type(MyInterface).interfaceId
 
 
 33. What is a slippage parameter useful for?
-Slippage means the difference between the price that you see on the screen when initialing a transaction and the actual price the swap is executed at. This difference appears because there’s a short delay between when you send a transaction and when it gets validated.
+Slippage is the price difference between when you submit a transaction and when the transaction is confirmed on the blockchain. 
 
 One important problem that slippage protection fixes is sandwich attacks. During sandwiching, attackers “wrap” your swap transactions in their two transactions: one goes before your transaction and the other goes after it. In the first transaction, an attacker modifier the state of a pool so that your swap becomes very unprofitable for you and somewhat profitable for the attacker. This is achieved by adjusting pool liquidity so that your trade happens at a lower price. In the second transaction, the attacker reestablishes pool liquidity and the price. As a result, you get much less tokens than expected due to manipulated prices, and the attacker get some profit.
 
-In UniswapV3 the parameter that allow a user to set a slippage is sqrtPriceLimitX96.
+Most decentralized exchanges give you the option to adjust slippage tolerance. You can increase or decrease your slippage tolerance percentage for different situations to make sure your transaction gets picked up.
+In UniswapV3 the parameter that allow a user to set a slippage is sqrtPriceLimitX96. 
 
 
 ## Hard
@@ -326,7 +343,7 @@ The approve() function allows a another person to be able to spend N amount of t
 If the malicious party already has an approve from the owner, and the owner wants to reduce the amount of token the malicious party can spend, the owner can send a new approve for a lower amount of token. Here is where the malicious party can take advantage of this. Using the insertion attack, the attacker could front-run the new approve transaction and spend the old value before the new value is set, and then additionally spend the new amount.
 
 3. What opcode accomplishes address(this).balance?
-You need to call first opcode SELFBALANCE (47).
+You need to call first opcode SELFBALANCE (0x47).
 
 4. What is an anonymous Solidity event?
 Events can be marked as anonymous, in which case they will not have a selector. Because of this they cannot be easily searched for, or decoded with certainty unless you have the specific contract ABI or the source code of the contract.
@@ -343,6 +360,7 @@ Mappings cannot be used as parameters or return parameters of contract functions
 But can they can be used as a parameter for internal or private functions since they are not exposed to the outside through the contract’s ABI, they can take parameters of internal types like mappings or storage references.
 
 6. What is an inflation attack in ERC4626?
+In DeFi Vaults are pools of funds with an associated strategy that aim to maximize returns on the assets inside the vault.
 ERC4626 is an extension of ERC20 that proposes a standard interface for token vaults. In exchange for the assets deposited into an ERC4626 vault, a user receives shares. These shares can later be burned to redeem the corresponding underlying assets. The number of shares a user gets depends on the amount of assets they put in and on the exchange rate of the vault. This exchange rate is defined by the current liquidity held by the vault. When depositing tokens, the number of shares a user gets is rounded down. 
 Attack scenario:
 A hacker back-runs the transaction of an ERC4626 pool creation.
@@ -432,12 +450,11 @@ Instead of ecrecover(), OpenZeppelin’s ECDSA library should be used instead be
 
 
 15. What is the difference between an optimistic rollup and a zk-rollup?
+https://coinmarketcap.com/alexandria/article/optimistic-rollups-vs-zk-rollups-the-ultimate-comparison
 
 Property                 | Optimistic | ZK-Rollup
 
 Proof                    | Fraud Proof (Users would have to challenge a transaction bundle to determine the invalidity of transactions)      | Validity proof (the operator is responsible for producing validity proofs to ensure the accuracy of the changes made)
-
-Fixed gas cost           | ~40,000 (a lightweight transaction that mainly just changes the value of the state root)  | 500,000 (verification of a ZK-SNARK is computationally intensive)
 
 Withdraw period          | ~1 week (withdrawals need to be delayed to give time for someone to publish a fraud proof and cancel the withdrawal if it is fraudulent) |   Very fast (just wait for the next batch)
 
@@ -509,7 +526,7 @@ As a result a malicious party can send only 1 ETH to the smart contract and put 
 21. Describe the calldata of a function that takes a dynamic length array of uint128 when uint128[1,2,3,4] is passed as an argument
 
 0x66454c64                                                          // function selector
-0000000000000000000000000000000000000000000000000000000000000020    // offset from here (skip the next 32 bytes)
+0000000000000000000000000000000000000000000000000000000000000020    // offset from here (start with the next 32 bytes)
 0000000000000000000000000000000000000000000000000000000000000004    // length
 0000000000000000000000000000000000000000000000000000000000000001    // first value
 0000000000000000000000000000000000000000000000000000000000000002    // second value
@@ -531,15 +548,13 @@ This happens because there is no opcode that represents the operations LTE or GT
 
 
 24. What is an access list transaction?
-An access list transaction (or EIP-2930 transaction) is transaction that has a list of addresses and storage keys that it plans to access.
+An access list transaction (or EIP-2930 transaction) is a transaction that has a list of addresses and storage keys that it plans to access.
 
 The Berlin hard fork raised the “cold” cost of account access opcodes (such as BALANCE, all CALL(s), and EXT*) to 2600 and raised the “cold” cost of state access opcode (SLOAD) from 800 to 2100 while lowering the “warm” cost for both to 100.
 
-An EIP-2930 transaction is carried out the same way as any other transaction, except that the cold storage cost is paid upfront with a discount, rather during the execution of the SLOAD operation. It does not require any modifications to the Solidity code and is purely specified client-side.
+An EIP-2930 transaction is carried out the same way as any other transaction, except that the cold storage cost is paid upfront with a discount, so that during the actual execution only the warm access is paid. This is a quick way to save up to 200 gas per storage slot. Access lists don’t provide any benefit for transactions that only access one smart contract and have only benefits for cross contract calls.
 
-The fee prepays the cold access of the storage slot so that during the actual execution, only the warm fee is paid. When the storage keys are known in advance, Ethereum node clients can pre-fetch storage values, effectively lowering the computational resource overhead.
-
-EIP-2930 does not prevent storage access outside the access list; putting an address-storage combination in the access list is not a commitment to use it. However, the result would be prepaying the cold storage load for no purpose.
+When the storage keys are known in advance, Ethereum node clients can pre-fetch storage values, effectively lowering the computational resource overhead. EIP-2930 does not prevent storage access outside the access list; putting an address-storage combination in the access list is not a commitment to use it. However, the result would be prepaying the cold storage load for no purpose.x
 
 
 25. Why is it necessary to take a snapshot of balances before conducting a governance vote?
